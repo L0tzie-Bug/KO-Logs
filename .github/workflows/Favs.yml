@@ -1,0 +1,77 @@
+name: Roblox Favorites Lookup
+
+on:
+  workflow_dispatch:
+    inputs:
+      user_id:
+        description: Roblox user id whose favorites to pull
+        default: "3882403525"
+      title_search:
+        description: Text to find in game titles (not case sensitive)
+        default: "kaiju reborn"
+      target_usernames:
+        description: Comma-separated usernames to alert on
+        default: "mr_bolde2,justaprogamer8"
+      keyword:
+        description: Keyword to look for in usernames or display names
+        default: "adf"
+      max_depth:
+        description: How many friend-of-friend hops to go from the creator
+        default: "2"
+      max_users:
+        description: Cap on friend lists fetched (depth 5 can be huge)
+        default: "3000"
+
+permissions:
+  contents: write
+
+jobs:
+  lookup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find game and creator
+        env:
+          ROBLOX_USER_ID: ${{ inputs.user_id }}
+          TITLE_SEARCH: ${{ inputs.title_search }}
+        run: python3 scripts/roblox_favorites_lookup.py
+
+      - name: Search creator's friend network
+        env:
+          TARGET_USERNAMES: ${{ inputs.target_usernames }}
+          KEYWORD: ${{ inputs.keyword }}
+          MAX_DEPTH: ${{ inputs.max_depth }}
+          MAX_USERS: ${{ inputs.max_users }}
+        run: python3 scripts/friend_search.py
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '### Game / creator'; echo '```json'; cat result.json 2>/dev/null || echo '{}'; echo '```'
+            echo '### Friend search'; echo '```json'; cat friend_search_result.json 2>/dev/null || echo '{}'; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit log to main
+        if: always()
+        run: |
+          [ -f friend_search_result.json ] || exit 0
+          mkdir -p logs
+          cp friend_search_result.json "logs/friend_search_run${{ github.run_number }}.json"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add logs
+          git commit -m "Add friend search log (run ${{ github.run_number }})"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kaiju-reborn-results
+          path: |
+            result.json
+            friend_search_result.json
+          if-no-files-found: ignore
